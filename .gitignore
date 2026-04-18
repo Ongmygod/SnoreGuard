@@ -1,0 +1,27 @@
+# Flutter build artifacts
+snoreguard_app/build/
+snoreguard_app/.dart_tool/
+snoreguard_app/.flutter-plugins
+snoreguard_app/.flutter-plugins-dependencies
+snoreguard_app/.packages
+snoreguard_app/pubspec.lock
+
+# Flutter IDE
+snoreguard_app/.idea/
+snoreguard_app/*.iml
+snoreguard_app/.vscode/
+
+# ModusToolbox downloaded libraries (re-downloadable via make getlibs)
+snoregurad_board/mtb_shared/
+
+# Firmware build artifacts
+snoregurad_board/SnoreGuard_Firmware/build/
+
+# APK build outputs
+*.apk
+*.aab
+
+# Misc
+*.log
+Thumbs.db
+.DS_Store
