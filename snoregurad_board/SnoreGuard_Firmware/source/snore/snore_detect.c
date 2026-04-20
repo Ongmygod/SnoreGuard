@@ -64,6 +64,9 @@ static snore_event_t s_pending_haptic_event;  /* event that triggered haptic */
 /* Current haptic level set by phone or auto-incremented */
 static uint8_t  s_haptic_level = 2;  /* default 60% */
 
+/* Haptic enable flag: motor will not fire when false */
+static bool     s_haptic_enabled = true;
+
 /*******************************************************************************
  * Private Timestamp State
  *******************************************************************************/
@@ -91,6 +94,7 @@ void snore_detect_init(void)
     s_haptic_cooldown       = false;
     s_post_haptic_open      = false;
     s_time_sync_state       = TIME_SYNC_NONE;
+    s_haptic_enabled        = true;
 
 #ifdef SNOREGUARD_DEBUG_LOG
     printf("[SnoreDetect] Initialized.\r\n");
@@ -130,15 +134,50 @@ uint32_t snore_get_timestamp(void)
 
 void snore_set_epoch_base(uint32_t epoch)
 {
+    uint32_t uptime = uptime_seconds();
+
+    /* Retroactively rebase any fallback-timestamped data to real calendar time.
+     * Events logged while the device was running without a synced clock carry
+     * timestamp = SNORE_FALLBACK_EPOCH_BASE + uptime_at_event. At sync time:
+     *     real_ts = epoch - (uptime - uptime_at_event)
+     *             = fallback_ts + (epoch - uptime - SNORE_FALLBACK_EPOCH_BASE)
+     * So a single constant offset fixes every fallback stamp at once. Without
+     * this, a session mixing pre-sync and post-sync episodes would span ~2.5
+     * years on the app's timeline chart and render as unreadable slivers.     */
+    int32_t offset = (int32_t)((int64_t)epoch
+                               - (int64_t)uptime
+                               - (int64_t)SNORE_FALLBACK_EPOCH_BASE);
+
+    /* 1. Rewrite persisted events in the SRAM ring buffer + flash. */
+    uint16_t rewritten = snore_log_rebase_fallback_timestamps(offset);
+
+    /* 2. Rewrite in-flight episode state so the next snore_log_add_event()
+     *    (either a gap-close or a 15-min post-haptic evaluation) carries the
+     *    correct real timestamp rather than a fallback one. */
+    if (s_episode_start_ts >= SNORE_FALLBACK_EPOCH_BASE &&
+        s_episode_start_ts <  SNORE_FALLBACK_EPOCH_BASE + 31536000UL)
+    {
+        s_episode_start_ts = (uint32_t)((int64_t)s_episode_start_ts + offset);
+    }
+    if (s_pending_haptic_event.timestamp >= SNORE_FALLBACK_EPOCH_BASE &&
+        s_pending_haptic_event.timestamp <  SNORE_FALLBACK_EPOCH_BASE + 31536000UL)
+    {
+        s_pending_haptic_event.timestamp =
+            (uint32_t)((int64_t)s_pending_haptic_event.timestamp + offset);
+    }
+
     s_epoch_base       = epoch;
-    s_uptime_at_sync_s = uptime_seconds();
+    s_uptime_at_sync_s = uptime;
     s_time_sync_state  = TIME_SYNC_OK;
 
     /* Also seed hardware RTC so timestamps survive disconnects accurately */
     rtc_time_set_unix(epoch);
 
 #ifdef SNOREGUARD_DEBUG_LOG
-    printf("[SnoreDetect] Time sync OK. epoch=%lu\r\n", (unsigned long)epoch);
+    printf("[SnoreDetect] Time sync OK. epoch=%lu, rebased %u logged event(s)\r\n",
+           (unsigned long)epoch, rewritten);
+#else
+    (void)rewritten;
 #endif
 }
 
@@ -232,6 +271,13 @@ static uint8_t window_count_recent(uint32_t now_s)
 
 static void trigger_haptic(void)
 {
+    if (!s_haptic_enabled)
+    {
+#ifdef SNOREGUARD_DEBUG_LOG
+        printf("[SnoreDetect] Haptic suppressed (disabled by app).\r\n");
+#endif
+        return;
+    }
     haptic_motor_fire(s_haptic_level);
     s_haptic_cooldown   = true;
     s_haptic_fired_at_s = uptime_seconds();
@@ -468,6 +514,17 @@ void snore_set_haptic_level(uint8_t level)
     printf("[SnoreDetect] Haptic level set to %u (%u%%)\r\n",
            level, 20u + level * 20u);
 #endif
+}
+
+void snore_set_haptic_enabled(bool enabled)
+{
+    s_haptic_enabled = enabled;
+    printf("[SnoreDetect] Haptic motor %s.\r\n", enabled ? "ENABLED" : "DISABLED");
+}
+
+bool snore_get_haptic_enabled(void)
+{
+    return s_haptic_enabled;
 }
 
 void snore_haptic_level_increment(void)

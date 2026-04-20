@@ -195,6 +195,47 @@ void snore_log_flush_to_flash(void)
     flash_save();
 }
 
+/* Fallback timestamps live in [SNORE_FALLBACK_EPOCH_BASE, +1 year).
+ * Real calendar epochs in use (2024+) are well above that upper bound, so this
+ * range check cleanly distinguishes fallback from real without extra metadata. */
+#define FALLBACK_RANGE_SECONDS   31536000UL   /* 1 year */
+
+uint16_t snore_log_rebase_fallback_timestamps(int32_t offset)
+{
+    if (s_count == 0 || offset == 0) return 0;
+
+    uint16_t rewritten = 0;
+
+    taskENTER_CRITICAL();
+    {
+        uint16_t tail = (uint16_t)((s_head + SNORE_LOG_MAX_EVENTS - s_count)
+                                   % SNORE_LOG_MAX_EVENTS);
+        for (uint16_t i = 0; i < s_count; i++)
+        {
+            uint16_t phys = (uint16_t)((tail + i) % SNORE_LOG_MAX_EVENTS);
+            uint32_t ts   = s_buf[phys].timestamp;
+
+            if (ts >= SNORE_FALLBACK_EPOCH_BASE &&
+                ts <  SNORE_FALLBACK_EPOCH_BASE + FALLBACK_RANGE_SECONDS)
+            {
+                s_buf[phys].timestamp = (uint32_t)((int64_t)ts + offset);
+                rewritten++;
+            }
+        }
+    }
+    taskEXIT_CRITICAL();
+
+    if (rewritten > 0)
+    {
+        flash_save();
+#ifdef SNOREGUARD_DEBUG_LOG
+        printf("[FlashLog] Rebased %u fallback event(s), offset=%ld\r\n",
+               rewritten, (long)offset);
+#endif
+    }
+    return rewritten;
+}
+
 void snore_log_print_report(void)
 {
 #ifdef SNOREGUARD_DEBUG_LOG

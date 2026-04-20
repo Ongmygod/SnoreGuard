@@ -83,4 +83,20 @@ void snore_log_flush_to_flash(void);
  */
 void snore_log_print_report(void);
 
+/**
+ * @brief Rewrite any fallback-timestamped events in the SRAM buffer to real
+ *        calendar time by adding a constant offset, then flush to flash.
+ *        Called from snore_set_epoch_base() the moment the phone writes
+ *        Time Sync so that episodes logged before sync land on the correct
+ *        day in the Flutter app timeline instead of ~Nov 2023.
+ *
+ *        Events whose timestamp is already outside the fallback range
+ *        (real calendar time, or sync'd previously) are left unchanged.
+ *
+ * @param offset  Signed seconds to add:
+ *                epoch_at_sync - uptime_at_sync - SNORE_FALLBACK_EPOCH_BASE
+ * @return Number of events whose timestamp was rewritten.
+ */
+uint16_t snore_log_rebase_fallback_timestamps(int32_t offset);
+
 #endif /* SOURCE_SNORE_SNORE_FLASH_LOG_H_ */
