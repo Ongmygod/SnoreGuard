@@ -10,6 +10,7 @@
  *      - Time Sync       (Write, 4 bytes)  : phone sets epoch at session start
  *      - Log Transfer    (Notify, 7 bytes) : streams snore events (morning sync)
  *      - Haptic Intensity(R/W, 1 byte)     : 0-4 maps to 20%-100% PWM duty
+ *      - Sync Ack        (Write, 1 byte)   : 0x01 = DB saved, clear log; 0x00 = keep log
  *******************************************************************************/
 
 #include "cycfg_gatt_db.h"
@@ -91,6 +92,22 @@ const uint8_t gatt_database[] =
             __UUID_CHARACTERISTIC_SLEEP_MONITOR_HAPTIC_INTENSITY,
             GATTDB_CHAR_PROP_READ | GATTDB_CHAR_PROP_WRITE | GATTDB_CHAR_PROP_WRITE_NO_RESPONSE,
             GATTDB_PERM_READABLE | GATTDB_PERM_WRITE_REQ | GATTDB_PERM_WRITE_CMD),
+
+        /* Sync Ack: Write-only, app sends 0x01 after saving all events to SQLite */
+        CHARACTERISTIC_UUID128_WRITABLE(
+            HDLC_SLEEP_MONITOR_SYNC_ACK,
+            HDLC_SLEEP_MONITOR_SYNC_ACK_VALUE,
+            __UUID_CHARACTERISTIC_SLEEP_MONITOR_SYNC_ACK,
+            GATTDB_CHAR_PROP_WRITE | GATTDB_CHAR_PROP_WRITE_NO_RESPONSE,
+            GATTDB_PERM_WRITE_REQ | GATTDB_PERM_WRITE_CMD),
+
+        /* Haptic Enable: Read/Write, 0x01=enabled (default), 0x00=motor will not fire */
+        CHARACTERISTIC_UUID128_WRITABLE(
+            HDLC_SLEEP_MONITOR_HAPTIC_ENABLE,
+            HDLC_SLEEP_MONITOR_HAPTIC_ENABLE_VALUE,
+            __UUID_CHARACTERISTIC_SLEEP_MONITOR_HAPTIC_ENABLE,
+            GATTDB_CHAR_PROP_READ | GATTDB_CHAR_PROP_WRITE | GATTDB_CHAR_PROP_WRITE_NO_RESPONSE,
+            GATTDB_PERM_READABLE | GATTDB_PERM_WRITE_REQ | GATTDB_PERM_WRITE_CMD),
 };
 
 const uint16_t gatt_database_len = sizeof(gatt_database);
@@ -115,6 +132,12 @@ uint8_t app_log_transfer_cccd[2]  = {0x00, 0x00};
 
 /* Haptic Intensity: default level 2 = 60% */
 uint8_t app_haptic_intensity_value[1] = {0x02};
+
+/* Sync Ack: 1 byte written by app after successful DB insert (0x01 = ack, 0x00 = nack) */
+uint8_t app_sync_ack_value[1] = {0x00};
+
+/* Haptic Enable: default 0x01 (enabled) */
+uint8_t app_haptic_enable_value[1] = {0x01};
 
 /******************************************************************************
  * GATT Attribute Lookup Table
@@ -151,6 +174,14 @@ gatt_db_lookup_table_t app_gatt_db_ext_attr_tbl[] =
     /* Haptic Intensity */
     { HDLC_SLEEP_MONITOR_HAPTIC_INTENSITY_VALUE,
       MAX_LEN_SLEEP_MONITOR_HAPTIC_INTENSITY, 1, app_haptic_intensity_value },
+
+    /* Sync Ack */
+    { HDLC_SLEEP_MONITOR_SYNC_ACK_VALUE,
+      MAX_LEN_SLEEP_MONITOR_SYNC_ACK, 1, app_sync_ack_value },
+
+    /* Haptic Enable */
+    { HDLC_SLEEP_MONITOR_HAPTIC_ENABLE_VALUE,
+      MAX_LEN_SLEEP_MONITOR_HAPTIC_ENABLE, 1, app_haptic_enable_value },
 };
 
 const uint16_t app_gatt_db_ext_attr_tbl_size =
@@ -166,3 +197,5 @@ const uint16_t app_time_sync_value_len         = sizeof(app_time_sync_value);
 const uint16_t app_log_transfer_event_len      = sizeof(app_log_transfer_event);
 const uint16_t app_log_transfer_cccd_len       = sizeof(app_log_transfer_cccd);
 const uint16_t app_haptic_intensity_value_len  = sizeof(app_haptic_intensity_value);
+const uint16_t app_sync_ack_value_len          = sizeof(app_sync_ack_value);
+const uint16_t app_haptic_enable_value_len     = sizeof(app_haptic_enable_value);

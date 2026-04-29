@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'widgets/connection_status_bar.dart';
 import 'widgets/device_scan_section.dart';
+import 'widgets/haptic_enable_toggle.dart';
 import 'widgets/haptic_intensity_slider.dart';
 import 'widgets/sync_section.dart';
 import 'widgets/about_section.dart';
@@ -34,6 +35,12 @@ class SettingsScreen extends StatelessWidget {
 
                   // Morning sync section
                   const SyncSection(),
+                  const SizedBox(height: 28),
+                  const Divider(),
+                  const SizedBox(height: 28),
+
+                  // Haptic motor enable/disable
+                  const HapticEnableToggle(),
                   const SizedBox(height: 28),
                   const Divider(),
                   const SizedBox(height: 28),

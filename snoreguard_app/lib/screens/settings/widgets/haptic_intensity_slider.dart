@@ -12,6 +12,8 @@ class HapticIntensitySlider extends StatelessWidget {
     final ble = context.watch<BleProvider>();
     final level = ble.hapticLevel;
     final isConnected = ble.isConnected;
+    final hapticEnabled = ble.hapticEnabled;
+    final sliderActive = isConnected && hapticEnabled;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -63,7 +65,7 @@ class HapticIntensitySlider extends StatelessWidget {
             max: 4,
             divisions: 4,
             label: BleConstants.hapticLabels[level],
-            onChanged: isConnected
+            onChanged: sliderActive
                 ? (v) => ble.setHapticLevel(v.round())
                 : null,
           ),
@@ -80,7 +82,7 @@ class HapticIntensitySlider extends StatelessWidget {
                   ),
             ),
             OutlinedButton.icon(
-              onPressed: isConnected
+              onPressed: sliderActive
                   ? () => _testHaptic(context, ble)
                   : null,
               icon: const Icon(Icons.vibration, size: 16),
@@ -97,6 +99,15 @@ class HapticIntensitySlider extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             'Connect to a device to adjust haptic intensity.',
+            style: Theme.of(context)
+                .textTheme
+                .labelSmall
+                ?.copyWith(color: AppColors.textSecondary),
+          ),
+        ] else if (!hapticEnabled) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Haptic motor is disabled. Enable it above to adjust intensity.',
             style: Theme.of(context)
                 .textTheme
                 .labelSmall

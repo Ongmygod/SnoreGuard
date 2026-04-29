@@ -7,6 +7,8 @@
  *   - Time Sync       (Write Only, 4 bytes) : phone → device epoch timestamp
  *   - Log Transfer    (Notify,     7 bytes) : device → phone, 1 event/notify
  *   - Haptic Intensity(Read/Write, 1 byte)  : haptic motor duty level 0-4
+ *   - Sync Ack        (Write Only, 1 byte)  : phone confirms DB save; triggers log clear
+ *   - Haptic Enable   (Read/Write, 1 byte)  : 0x01=enabled (default), 0x00=disabled
  *
  * Binary event packet (7 bytes, little-endian):
  *   [timestamp:4][duration_s:1][haptic_success:1][haptic_flag:1]
@@ -30,6 +32,7 @@
  * Time Sync:        first byte 0xE1
  * Log Transfer:     first byte 0xE2
  * Haptic Intensity: first byte 0xE3
+ * Sync Ack:         first byte 0xE4
  */
 #define __UUID_SERVICE_SLEEP_MONITOR \
     0x55, 0x44, 0x33, 0x22, 0x11, 0x00, 0xF6, 0xA0, \
@@ -86,6 +89,31 @@
 #define HDLC_SLEEP_MONITOR_HAPTIC_INTENSITY_VALUE           0x0011
 #define MAX_LEN_SLEEP_MONITOR_HAPTIC_INTENSITY              0x0001
 
+/* Sync Ack Characteristic (Write Only, 1 byte)
+ * App writes 0x01 after successfully saving all events to SQLite.
+ * Firmware clears log only on receiving this ack.
+ * UUID: e41f5698-4b21-4710-a0f6-001122334455
+ */
+#define __UUID_CHARACTERISTIC_SLEEP_MONITOR_SYNC_ACK \
+    0x55, 0x44, 0x33, 0x22, 0x11, 0x00, 0xF6, 0xA0, \
+    0x10, 0x47, 0x21, 0x4B, 0x98, 0x56, 0x1F, 0xE4
+
+#define HDLC_SLEEP_MONITOR_SYNC_ACK                         0x0012
+#define HDLC_SLEEP_MONITOR_SYNC_ACK_VALUE                   0x0013
+#define MAX_LEN_SLEEP_MONITOR_SYNC_ACK                      0x0001
+
+/* Haptic Enable Characteristic (Read/Write, 1 byte)
+ * 0x01 = haptic motor enabled (default), 0x00 = disabled (motor will not fire).
+ * UUID: e51f5698-4b21-4710-a0f6-001122334455
+ */
+#define __UUID_CHARACTERISTIC_SLEEP_MONITOR_HAPTIC_ENABLE \
+    0x55, 0x44, 0x33, 0x22, 0x11, 0x00, 0xF6, 0xA0, \
+    0x10, 0x47, 0x21, 0x4B, 0x98, 0x56, 0x1F, 0xE5
+
+#define HDLC_SLEEP_MONITOR_HAPTIC_ENABLE                    0x0014
+#define HDLC_SLEEP_MONITOR_HAPTIC_ENABLE_VALUE              0x0015
+#define MAX_LEN_SLEEP_MONITOR_HAPTIC_ENABLE                 0x0001
+
 /* --- Lookup Table Type --- */
 typedef struct
 {
@@ -126,5 +154,13 @@ extern const uint16_t app_log_transfer_cccd_len;
 /* Sleep Monitor: Haptic Intensity */
 extern uint8_t  app_haptic_intensity_value[];
 extern const uint16_t app_haptic_intensity_value_len;
+
+/* Sleep Monitor: Sync Ack */
+extern uint8_t  app_sync_ack_value[];
+extern const uint16_t app_sync_ack_value_len;
+
+/* Sleep Monitor: Haptic Enable */
+extern uint8_t  app_haptic_enable_value[];
+extern const uint16_t app_haptic_enable_value_len;
 
 #endif /* CYCFG_GATT_DB_H */

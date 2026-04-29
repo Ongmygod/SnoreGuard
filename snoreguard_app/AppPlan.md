@@ -34,6 +34,8 @@ The app operates **fully offline**. No internet connectivity is required at any 
 | **Time Sync** | `e11f5698-...` | App → Device (Write) | 4 bytes | Unix epoch uint32 little-endian |
 | **Log Transfer** | `e21f5698-...` | Device → App (Notify) | 7 bytes/event | Binary event packet stream |
 | **Haptic Intensity** | `e31f5698-...` | Both (Read/Write) | 1 byte | Level 0–4 = 20/40/60/80/100% |
+| **Sync Ack** | `e41f5698-...` | App → Device (Write) | 1 byte | `0x01` after SQLite save → firmware clears log |
+| **Haptic Enable** | `e51f5698-...` | Both (Read/Write) | 1 byte | `0x01` = enabled (default), `0x00` = motor suppressed |
 
 ### 2.3 Binary Event Packet (7 bytes, little-endian)
 
@@ -52,7 +54,8 @@ Offset  Size  Field            Description
 4. Device streams all buffered events as individual BLE notifications
 5. App detects end-of-stream via 2-second silence timeout (no explicit EOS marker)
 6. App batch-inserts events into SQLite (deduplication via UNIQUE index)
-7. App reads back current haptic level (firmware may have auto-escalated during sleep)
+7. App writes **Sync Ack** (`0x01`) to firmware → firmware clears its event log
+8. App reads back current haptic level and haptic-enable state (firmware may have auto-escalated during sleep)
 
 ### 2.5 Fallback Timestamps
 If the device is not time-synced before sleep (no BLE connection within 30 s), it uses a fallback epoch base of `1700000000` (≈ Nov 2023) + device uptime. The app detects timestamps in the range `[1700000000, 1700000000 + 31536000)` and marks them as `isFallbackTimestamp = true`, using today's date as the session date and displaying a warning in the Session Detail view.
@@ -104,7 +107,8 @@ Example: snore at 2025-06-11 02:30 → `session_date = "2025-06-10"`.
 - **Connection Status Bar** — persistent colored banner at top
 - **Device Scan Section** — Scan button, results list with Connect buttons; connected device with Disconnect
 - **Morning Sync Section** — instructions, Sync Now button, live event count progress, result banner
-- **Haptic Intensity Slider** — 5 discrete levels (20–100%), Test button to send a test vibration
+- **Haptic Motor Toggle** — ON/OFF switch to enable or disable the haptic motor entirely; greyed when disconnected
+- **Haptic Intensity Slider** — 5 discrete levels (20–100%), Test button to send a test vibration; disabled when haptic is OFF or device disconnected
 - **About Section** — app version, device name, data retention policy
 
 ### 4.4 Onboarding Screen (first launch only)
@@ -204,6 +208,7 @@ lib/
 │       └── widgets/
 │           ├── connection_status_bar.dart
 │           ├── device_scan_section.dart
+│           ├── haptic_enable_toggle.dart
 │           ├── haptic_intensity_slider.dart
 │           ├── sync_section.dart
 │           └── about_section.dart

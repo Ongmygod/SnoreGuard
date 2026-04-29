@@ -18,6 +18,7 @@ class BleProvider extends ChangeNotifier {
   int _syncEventsReceived = 0;
   int _syncNewEvents = 0;
   int _hapticLevel = BleConstants.defaultHapticLevel;
+  bool _hapticEnabled = true;
   String? _errorMessage;
   String? _connectedDeviceName;
   bool _permissionsGranted = false;
@@ -34,6 +35,7 @@ class BleProvider extends ChangeNotifier {
   int get syncEventsReceived => _syncEventsReceived;
   int get syncNewEvents => _syncNewEvents;
   int get hapticLevel => _hapticLevel;
+  bool get hapticEnabled => _hapticEnabled;
   String? get errorMessage => _errorMessage;
   String? get connectedDeviceName => _connectedDeviceName;
   bool get permissionsGranted => _permissionsGranted;
@@ -115,9 +117,11 @@ class BleProvider extends ChangeNotifier {
 
       // Read current haptic level (firmware may have auto-escalated during sleep)
       final level = await _bleService.readHapticIntensity();
-      if (level != null) {
-        _hapticLevel = level;
-      }
+      if (level != null) _hapticLevel = level;
+
+      // Read haptic enable state from device
+      final enabled = await _bleService.readHapticEnabled();
+      if (enabled != null) _hapticEnabled = enabled;
     } on TimeoutException {
       _setError('Connection timed out. Move closer to the device and try again.');
     } on StateError catch (e) {
@@ -164,9 +168,16 @@ class BleProvider extends ChangeNotifier {
       _syncNewEvents = await _dao.insertEvents(events);
       _syncComplete = true;
 
-      // Read back haptic level — firmware may have auto-escalated
+      // Acknowledge to device that all events were saved — triggers log clear on firmware
+      if (events.isNotEmpty) {
+        await _bleService.sendSyncAck(success: true);
+      }
+
+      // Read back haptic level and enable state — firmware may have auto-escalated
       final level = await _bleService.readHapticIntensity();
       if (level != null) _hapticLevel = level;
+      final enabled = await _bleService.readHapticEnabled();
+      if (enabled != null) _hapticEnabled = enabled;
 
       onComplete?.call();
     } on StateError catch (e) {
@@ -193,6 +204,23 @@ class BleProvider extends ChangeNotifier {
     _syncComplete = false;
     _syncEventsReceived = 0;
     _syncNewEvents = 0;
+    notifyListeners();
+  }
+
+  // ---------- Haptic Enable ----------
+
+  Future<void> setHapticEnabled(bool enabled) async {
+    if (!isConnected) {
+      _setError('Not connected to a device.');
+      return;
+    }
+    _clearError();
+    try {
+      await _bleService.writeHapticEnabled(enabled);
+      _hapticEnabled = enabled;
+    } catch (e) {
+      _setError('Could not update haptic enabled state: ${_friendly(e)}');
+    }
     notifyListeners();
   }
 

@@ -57,4 +57,9 @@ class BlePacketParser {
     assert(level >= 0 && level <= 4, 'Haptic level must be 0–4');
     return Uint8List.fromList([level]);
   }
+
+  /// Encode a sync ack byte: 0x01 = success (clear log), 0x00 = failure (keep log).
+  static Uint8List encodeSyncAck({required bool success}) {
+    return Uint8List.fromList([success ? 0x01 : 0x00]);
+  }
 }

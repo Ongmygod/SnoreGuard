@@ -152,4 +152,19 @@ void snore_on_haptic_complete(void);
  */
 void snore_detect_flush_open_episode(void);
 
+/* ---- Haptic Enable API (called from BLE GATT write handler) ---- */
+
+/**
+ * @brief Enable or disable the haptic motor.
+ *        When disabled, trigger_haptic() is a no-op — the motor will not fire.
+ * @param enabled  true = motor fires normally; false = motor suppressed.
+ */
+void snore_set_haptic_enabled(bool enabled);
+
+/**
+ * @brief Return current haptic-enable state.
+ * @return true if haptic motor is enabled (default), false if disabled.
+ */
+bool snore_get_haptic_enabled(void);
+
 #endif /* SOURCE_SNORE_SNORE_DETECT_H_ */

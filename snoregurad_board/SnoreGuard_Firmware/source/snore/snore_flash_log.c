@@ -34,16 +34,6 @@ static void flash_save(void)
 
     if (s_count == 0) return;
 
-    /* Save count (head is derived from linearized layout on reload) */
-    rslt = mtb_kvstore_write(&kvstore_obj, KV_KEY_LOG_COUNT,
-                             (const uint8_t *)&s_count, sizeof(s_count));
-    if (CY_RSLT_SUCCESS != rslt)
-    {
-        printf("[FlashLog] ERROR: Failed to write count (%lu)\r\n",
-               (unsigned long)rslt);
-        return;
-    }
-
     /* Linearize the circular buffer (oldest event first) into a static scratch
      * buffer, then write only the s_count active events.  This keeps the write
      * size small (s_count * 7 bytes) and avoids the 1400-byte fixed-size write
@@ -56,12 +46,25 @@ static void flash_save(void)
         s_linear[i] = s_buf[(tail + i) % SNORE_LOG_MAX_EVENTS];
     }
 
+    /* Write data BEFORE count. If power is lost between the two writes, the
+     * count key still reflects the old (smaller) value, so flash_load() reads
+     * a consistent prefix of the data and just loses the newest event —
+     * preferable to a count/data mismatch that would read garbage.           */
     rslt = mtb_kvstore_write(&kvstore_obj, KV_KEY_LOG_DATA,
                              (const uint8_t *)s_linear,
                              (uint32_t)s_count * sizeof(snore_event_t));
     if (CY_RSLT_SUCCESS != rslt)
     {
         printf("[FlashLog] ERROR: Failed to write data (%lu)\r\n",
+               (unsigned long)rslt);
+        return;
+    }
+
+    rslt = mtb_kvstore_write(&kvstore_obj, KV_KEY_LOG_COUNT,
+                             (const uint8_t *)&s_count, sizeof(s_count));
+    if (CY_RSLT_SUCCESS != rslt)
+    {
+        printf("[FlashLog] ERROR: Failed to write count (%lu)\r\n",
                (unsigned long)rslt);
     }
 #ifdef SNOREGUARD_DEBUG_LOG
@@ -161,16 +164,27 @@ uint16_t snore_log_get_count(void)
 
 bool snore_log_get_event(uint16_t index, snore_event_t *out)
 {
-    if (!out || index >= s_count) return false;
+    if (!out) return false;
 
-    /* Translate logical index to physical ring-buffer index.
-     * Oldest event is at: (s_head - s_count + SNORE_LOG_MAX_EVENTS) % MAX  */
-    uint16_t tail = (uint16_t)((s_head + SNORE_LOG_MAX_EVENTS - s_count)
-                               % SNORE_LOG_MAX_EVENTS);
-    uint16_t phys = (uint16_t)((tail + index) % SNORE_LOG_MAX_EVENTS);
+    bool ok = false;
 
-    *out = s_buf[phys];
-    return true;
+    /* Critical section: audio_inference_task may be writing to s_buf[] via
+     * snore_log_add_event() concurrently. Without this guard, a 7-byte struct
+     * copy could observe a partially-written event during Morning Sync.      */
+    taskENTER_CRITICAL();
+    {
+        if (index < s_count)
+        {
+            uint16_t tail = (uint16_t)((s_head + SNORE_LOG_MAX_EVENTS - s_count)
+                                       % SNORE_LOG_MAX_EVENTS);
+            uint16_t phys = (uint16_t)((tail + index) % SNORE_LOG_MAX_EVENTS);
+            *out = s_buf[phys];
+            ok = true;
+        }
+    }
+    taskEXIT_CRITICAL();
+
+    return ok;
 }
 
 void snore_log_clear(void)

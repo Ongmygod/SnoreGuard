@@ -16,10 +16,9 @@ class WeeklySummaryCard extends StatelessWidget {
     if (summary == null) return const SizedBox.shrink();
 
     final sevenDayStats = _buildSevenDayStats(summary.dailyStats);
-    final maxCount = sevenDayStats
-            .map((d) => d.snoreCount)
-            .fold(0, (a, b) => a > b ? a : b)
-            .toDouble();
+    final maxDuration = sevenDayStats
+            .map((d) => d.totalDurationS.toDouble())
+            .fold(0.0, (a, b) => a > b ? a : b);
 
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 6),
@@ -67,7 +66,7 @@ class WeeklySummaryCard extends StatelessWidget {
             // Bar chart
             SizedBox(
               height: 100,
-              child: maxCount == 0
+              child: maxDuration == 0
                   ? Center(
                       child: Text(
                         'No data',
@@ -77,7 +76,7 @@ class WeeklySummaryCard extends StatelessWidget {
                   : BarChart(
                       BarChartData(
                         alignment: BarChartAlignment.spaceAround,
-                        maxY: maxCount + (maxCount * 0.2).ceilToDouble() + 1,
+                        maxY: maxDuration + (maxDuration * 0.2) + 1,
                         barTouchData: BarTouchData(
                           enabled: true,
                           touchTooltipData: BarTouchTooltipData(
@@ -85,7 +84,7 @@ class WeeklySummaryCard extends StatelessWidget {
                             getTooltipItem: (group, groupIndex, rod, rodIndex) {
                               final stat = sevenDayStats[group.x];
                               return BarTooltipItem(
-                                '${stat.snoreCount}',
+                                _formatAvgDuration(stat.totalDurationS.toDouble()),
                                 const TextStyle(
                                     color: AppColors.textPrimary, fontSize: 12),
                               );
@@ -129,8 +128,8 @@ class WeeklySummaryCard extends StatelessWidget {
                             x: i,
                             barRods: [
                               BarChartRodData(
-                                toY: sevenDayStats[i].snoreCount.toDouble(),
-                                color: sevenDayStats[i].snoreCount > 0
+                                toY: sevenDayStats[i].totalDurationS.toDouble(),
+                                color: sevenDayStats[i].totalDurationS > 0
                                     ? AppColors.primary
                                     : AppColors.divider,
                                 width: 16,

@@ -21,6 +21,24 @@ snoregurad_board/SnoreGuard_Firmware/build/
 *.apk
 *.aab
 
+# Ninja build log (firmware build artifact)
+.ninja_log
+
+# IDE and tool internals
+.idea/
+.vscode/
+.metadata/
+**/.idea/
+**/.vscode/
+**/.metadata/
+
+# Claude Code session data
+.claude/
+**/.claude/
+
+# Word temporary lock files
+~$*
+
 # Misc
 *.log
 Thumbs.db

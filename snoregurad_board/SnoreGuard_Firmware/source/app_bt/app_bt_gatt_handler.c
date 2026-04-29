@@ -40,6 +40,8 @@
 
 static bool     s_morning_sync_active = false;
 static uint16_t s_morning_sync_idx    = 0;   /* next event index to send */
+static uint16_t s_morning_sync_total  = 0;   /* snapshot of count at sync start (MUST NOT change during sync) */
+static bool     s_pending_ack         = false; /* true = all events sent, awaiting app ack */
 
 /*******************************************************************************
  * Helper: find attribute in lookup table
@@ -254,9 +256,11 @@ app_bt_gatt_connection_down(wiced_bt_gatt_connection_status_t *p_status)
     memset(hello_sensor_state.remote_addr, 0, BD_ADDR_LEN);
     hello_sensor_state.conn_id = 0;
 
-    /* Cancel any ongoing morning sync */
+    /* Cancel any ongoing morning sync; log is preserved if app never acked */
     s_morning_sync_active = false;
     s_morning_sync_idx    = 0;
+    s_morning_sync_total  = 0;
+    s_pending_ack         = false;
 
     /* Notify event handler */
     app_bt_on_connection_down();
@@ -408,6 +412,49 @@ app_bt_set_value(uint16_t attr_handle, uint8_t *p_val, uint16_t len)
                 break;
 
             /* ----------------------------------------------------------------
+             * Sync Ack Write
+             * App writes 0x01 after successfully inserting all events into
+             * its local SQLite database.  Only then is the on-device log cleared.
+             * App writes 0x00 (or omits the write) on failure; log is preserved.
+             * ---------------------------------------------------------------- */
+            case HDLC_SLEEP_MONITOR_SYNC_ACK_VALUE:
+                if (len != 1)
+                    return WICED_BT_GATT_INVALID_ATTR_LEN;
+                if (p_val[0] == 0x01 && s_pending_ack)
+                {
+                    printf("[MorningSync] Sync Ack received – clearing log.\r\n");
+                    s_pending_ack = false;
+                    snore_log_clear();
+                }
+                else if (p_val[0] == 0x00)
+                {
+                    printf("[MorningSync] Sync Nack received – log preserved.\r\n");
+                    s_pending_ack = false;
+                }
+                else
+                {
+                    printf("[MorningSync] WARN: Ack received but not in pending state "
+                           "(val=%u).\r\n", p_val[0]);
+                }
+                break;
+
+            /* ----------------------------------------------------------------
+             * Haptic Enable Write
+             * App writes 0x01 to enable or 0x00 to disable the haptic motor.
+             * ---------------------------------------------------------------- */
+            case HDLC_SLEEP_MONITOR_HAPTIC_ENABLE_VALUE:
+                if (len != 1)
+                    return WICED_BT_GATT_INVALID_ATTR_LEN;
+                {
+                    bool enabled = (p_val[0] != 0x00);
+                    app_haptic_enable_value[0] = enabled ? 0x01 : 0x00;
+                    snore_set_haptic_enabled(enabled);
+                    printf("[GATT] Haptic motor %s by app.\r\n",
+                           enabled ? "ENABLED" : "DISABLED");
+                }
+                break;
+
+            /* ----------------------------------------------------------------
              * Generic Attribute service-changed CCCD (required by BLE spec)
              * ---------------------------------------------------------------- */
             case HDLD_GATT_SERVICE_CHANGED_CLIENT_CHAR_CONFIG:
@@ -512,6 +559,8 @@ void app_bt_morning_sync_start(void)
     /* Close any in-progress snore episode so it gets streamed this session. */
     snore_detect_flush_open_episode();
 
+    /* Snapshot the count NOW. New events added by the audio task during
+     * streaming must not be included — they belong to the next sync session. */
     uint16_t count = snore_log_get_count();
     printf("[MorningSync] Starting – %u events to send.\r\n", count);
 
@@ -523,6 +572,7 @@ void app_bt_morning_sync_start(void)
 
     s_morning_sync_active = true;
     s_morning_sync_idx    = 0;
+    s_morning_sync_total  = count;   /* fixed upper bound for this session */
 
     app_bt_morning_sync_send_next();
 }
@@ -531,16 +581,31 @@ void app_bt_morning_sync_send_next(void)
 {
     if (!s_morning_sync_active) return;
 
+    /* Use the snapshotted total so events added by the audio task during
+     * streaming do not extend this sync session. */
+    if (s_morning_sync_idx >= s_morning_sync_total)
+    {
+        /* All events sent — wait for app to confirm DB save before clearing */
+        printf("[MorningSync] Complete. %u events sent. Awaiting app ack.\r\n",
+               s_morning_sync_idx);
+        s_morning_sync_active = false;
+        s_morning_sync_idx    = 0;
+        s_morning_sync_total  = 0;
+        s_pending_ack         = true;
+        /* snore_log_clear() is now called only from the Sync Ack write handler */
+        return;
+    }
+
     snore_event_t event;
     if (!snore_log_get_event(s_morning_sync_idx, &event))
     {
-        /* All events sent */
-        printf("[MorningSync] Complete. %u events sent.\r\n", s_morning_sync_idx);
+        /* Defensive: index is within total but get_event failed (should not happen) */
+        printf("[MorningSync] WARN: get_event(%u) failed unexpectedly – aborting.\r\n",
+               s_morning_sync_idx);
         s_morning_sync_active = false;
         s_morning_sync_idx    = 0;
-
-        /* Clear log after successful transfer */
-        snore_log_clear();
+        s_morning_sync_total  = 0;
+        s_pending_ack         = true;
         return;
     }
 
@@ -553,6 +618,17 @@ void app_bt_morning_sync_send_next(void)
     app_log_transfer_event[5] = event.haptic_success;
     app_log_transfer_event[6] = event.haptic_flag;
 
+    /* Pre-increment idx BEFORE send. The WICED stack fires
+     * GATT_APP_BUFFER_TRANSMITTED_EVT synchronously inside
+     * wiced_bt_gatt_server_send_notification(), which re-enters this
+     * function via the handler at line ~124. If we increment AFTER send,
+     * the recursive entries see stale idx, miss the cap check, and keep
+     * sending until the BLE controller TX queue fills (typically 9 deep) —
+     * the original "always 9 events" bug. Pre-incrementing makes the
+     * cap check correct under recursion; rollback on send failure
+     * preserves the retry semantics. */
+    s_morning_sync_idx++;
+
     wiced_bt_gatt_status_t status =
         wiced_bt_gatt_server_send_notification(
             hello_sensor_state.conn_id,
@@ -561,13 +637,10 @@ void app_bt_morning_sync_send_next(void)
             app_log_transfer_event,
             NULL);
 
-    if (WICED_BT_GATT_SUCCESS == status)
+    if (WICED_BT_GATT_SUCCESS != status)
     {
-        s_morning_sync_idx++;
-    }
-    else
-    {
-        /* Retry on next buffer-transmitted callback or stop if disconnected */
+        /* Roll back so the next buffer-transmitted callback retries this index */
+        s_morning_sync_idx--;
         printf("[MorningSync] WARN: notify status %d – will retry.\r\n", status);
         if (0 == hello_sensor_state.conn_id)
         {

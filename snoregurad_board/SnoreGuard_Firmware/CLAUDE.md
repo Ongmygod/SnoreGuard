@@ -96,6 +96,8 @@ Handles are defined in `GeneratedSource/cycfg_gatt_db.h`. Write logic lives in `
 | `0x000E` | Log Transfer | Device → Phone (Notify) | Streams 7-byte event packets on morning sync |
 | `0x000F` | Log Transfer CCCD | Phone → Device | Saves to kv-store via `app_bt_update_cccd()` |
 | `0x0011` | Haptic Intensity | Phone → Device | `snore_set_haptic_level(0-4)` |
+| `0x0013` | Sync Ack | Phone → Device | `0x01` → `snore_log_clear()`; `0x00` → log preserved |
+| `0x0015` | Haptic Enable | Phone → Device | `0x01` → `snore_set_haptic_enabled(true)`; `0x00` → motor suppressed |
 
 **7-byte notification packet layout** (little-endian):
 ```
@@ -105,7 +107,7 @@ Handles are defined in `GeneratedSource/cycfg_gatt_db.h`. Write logic lives in `
 [6]    uint8   haptic_flag
 ```
 
-Morning sync is triggered by a short button press (50–250 ms) → `app_bt_morning_sync_start()` in `source/app_bt/app_bt_gatt_handler.c` → sends first notification → each `GATT_APP_BUFFER_TRANSMITTED_EVT` triggers the next via `app_bt_morning_sync_send_next()` → after last event, calls `snore_log_clear()`.
+Morning sync is triggered by a short button press (50–250 ms) → `app_bt_morning_sync_start()` in `source/app_bt/app_bt_gatt_handler.c` → sends first notification → each `GATT_APP_BUFFER_TRANSMITTED_EVT` triggers the next via `app_bt_morning_sync_send_next()` → after last event, sets `s_pending_ack = true` (log is **not** cleared yet) → app writes `0x01` to Sync Ack (`0x0013`) after SQLite insert → `snore_log_clear()` is called only then. If the app disconnects or fails before writing ack, the log is preserved and re-transmitted on the next sync.
 
 ### Flash Storage (kv-store)
 
@@ -301,6 +303,7 @@ The app was built to match this firmware's GATT service exactly. UUIDs were deri
 | Time Sync | `e11f5698-4b21-4710-a0f6-001122334455` | Write 4-byte uint32 LE epoch on connect |
 | Log Transfer | `e21f5698-4b21-4710-a0f6-001122334455` | Subscribe notify, parse 7-byte LE packets |
 | Haptic Intensity | `e31f5698-4b21-4710-a0f6-001122334455` | Read/Write 1-byte value 0–4 |
+| Sync Ack | `e41f5698-4b21-4710-a0f6-001122334455` | Write `0x01` after SQLite insert succeeds; triggers log clear |
 
 Device advertised name: `"SnoreGuard"` (matched in scan filter).
 

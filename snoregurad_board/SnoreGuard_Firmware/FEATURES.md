@@ -127,6 +127,8 @@ The device advertises as `SnoreGuard` on boot and exposes a custom BLE GATT serv
 | **Log Transfer** | Device → Phone | Device streams stored events as 7-byte notifications (Morning Sync) |
 | **Log Transfer CCCD** | Phone → Device | Enables/disables BLE notifications; saved to flash for bonded devices |
 | **Haptic Intensity** | Phone → Device | Sets haptic level 0–4 (overrides auto-escalation) |
+| **Sync Ack** | Phone → Device | App writes `0x01` after saving events to SQLite; triggers log clear on device |
+| **Haptic Enable** | Both (Read/Write) | `0x01` = motor fires normally (default); `0x00` = motor suppressed |
 
 **Bond persistence:** Bonding information (link keys, CCCD) is stored in the same kv-store partition as the event log and survives power cycles.
 
@@ -134,7 +136,18 @@ The device advertises as `SnoreGuard` on boot and exposes a custom BLE GATT serv
 
 ---
 
-### 8. Morning Sync (Log Transfer over BLE)
+### 8. Haptic Enable / Disable
+
+**What it does:**
+The phone app can fully suppress the haptic motor via the **Haptic Enable** BLE characteristic. When disabled (`0x00`), `trigger_haptic()` in `snore_detect.c` becomes a no-op — the sliding-window logic still runs and snore events are still logged, but the motor never fires. Re-enabling (`0x01`) restores normal operation. The enabled state is readable by the phone so the UI always reflects the current device setting.
+
+**Implementation:** `snore_set_haptic_enabled()` / `snore_get_haptic_enabled()` in `snore_detect.c`; GATT handle `0x0015` (UUID `e51f5698-...`) in `app_bt_gatt_handler.c`.
+
+**Relevant files:** `source/snore/snore_detect.c/.h`, `source/app_bt/app_bt_gatt_handler.c`
+
+---
+
+### 9. Morning Sync (Log Transfer over BLE)
 
 **What it does:**  
 After waking up, the user short-presses the button to stream all stored events to the phone as a sequence of BLE notifications, one 7-byte packet per event. After all events are sent successfully, the log is cleared from both SRAM and flash.
@@ -148,7 +161,7 @@ If the phone is not connected when the button is pressed, the firmware starts BL
 
 ---
 
-### 9. Button Controls
+### 10. Button Controls
 
 **Main button (CYBSP_USER_BTN):**
 
@@ -164,7 +177,7 @@ Enable by adding `SNOREGUARD_ENABLE_LEVEL_BUTTON` to `Makefile DEFINES`. Each pr
 
 ---
 
-### 10. Debug UART Report
+### 11. Debug UART Report
 
 **What it does:**  
 When `SNOREGUARD_DEBUG_LOG` is defined (on by default in the Makefile), the firmware prints detailed logs to the UART debug port (115200 baud):

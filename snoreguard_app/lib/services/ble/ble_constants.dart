@@ -25,10 +25,22 @@ class BleConstants {
   static final Guid hapticIntensityUuid =
       Guid('e31f5698-4b21-4710-a0f6-001122334455');
 
+  /// Sync Ack characteristic (Write only, 1 byte).
+  /// App writes 0x01 after inserting all synced events into SQLite.
+  static final Guid syncAckUuid =
+      Guid('e41f5698-4b21-4710-a0f6-001122334455');
+
+  /// Haptic Enable characteristic (Read/Write, 1 byte).
+  /// 0x01 = motor enabled (default), 0x00 = motor disabled.
+  static final Guid hapticEnabledUuid =
+      Guid('e51f5698-4b21-4710-a0f6-001122334455');
+
   // ---------- Packet sizes ----------
   static const int eventPacketSize = 7;
   static const int timeSyncSize = 4;
   static const int hapticIntensitySize = 1;
+  static const int syncAckSize = 1;
+  static const int hapticEnabledSize = 1;
 
   // ---------- Haptic levels ----------
   static const List<String> hapticLabels = ['20%', '40%', '60%', '80%', '100%'];

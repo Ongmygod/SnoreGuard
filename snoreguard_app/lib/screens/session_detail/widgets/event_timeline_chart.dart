@@ -24,10 +24,17 @@ class EventTimelineChart extends StatelessWidget {
       );
     }
 
-    final start = events
+    // Use only real-timestamp events for the domain so that fallback-timestamp
+    // events (Nov 2023 epoch) don't collapse a 2.5-year axis, making real
+    // events invisible. Fallback events clamp to x=0 (left edge).
+    final domainEvents = events.any((e) => !e.isFallbackTimestamp)
+        ? events.where((e) => !e.isFallbackTimestamp).toList()
+        : events;
+
+    final start = domainEvents
         .map((e) => e.eventTimestamp)
         .reduce((a, b) => a < b ? a : b);
-    final end = events
+    final end = domainEvents
         .map((e) => e.eventTimestamp + e.durationS)
         .reduce((a, b) => a > b ? a : b);
     final span = end - start;

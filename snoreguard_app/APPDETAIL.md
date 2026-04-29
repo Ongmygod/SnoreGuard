@@ -220,6 +220,8 @@ static final serviceUuid         = Guid('e01f5698-4b21-4710-a0f6-001122334455');
 static final timeSyncUuid        = Guid('e11f5698-4b21-4710-a0f6-001122334455');
 static final logTransferUuid     = Guid('e21f5698-4b21-4710-a0f6-001122334455');
 static final hapticIntensityUuid = Guid('e31f5698-4b21-4710-a0f6-001122334455');
+static final syncAckUuid         = Guid('e41f5698-4b21-4710-a0f6-001122334455');
+static final hapticEnabledUuid   = Guid('e51f5698-4b21-4710-a0f6-001122334455');
 
 static const deviceName    = 'SnoreGuard';
 static const scanTimeout   = Duration(seconds: 10);
@@ -238,6 +240,9 @@ static Uint8List encodeTimeSyncPayload() { ... }
 
 // Encodes haptic level 0-4 as single byte.
 static Uint8List encodeHapticLevel(int level) { ... }
+
+// Encodes 0x01 (success) or 0x00 (failure) for Sync Ack write.
+static Uint8List encodeSyncAck({required bool success}) { ... }
 ```
 
 ### `ble_service.dart` — Morning Sync Stream
@@ -283,8 +288,10 @@ Future<void> performMorningSync({VoidCallback? onComplete}) async {
   // 1. Subscribe to sync stream
   // 2. Collect events into List<SnoreEvent>
   // 3. Batch insert → get newEventCount
-  // 4. Read back haptic level (firmware may have auto-escalated)
-  // 5. Call onComplete?.call()
+  // 4. Write Sync Ack 0x01 → firmware clears its log (only on success)
+  // 5. Read back haptic level (firmware may have auto-escalated overnight)
+  // 6. Read back haptic-enable state
+  // 7. Call onComplete?.call()
 }
 ```
 

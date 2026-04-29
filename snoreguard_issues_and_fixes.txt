@@ -1,0 +1,168 @@
+================================================================================
+  SnoreGuard Firmware – Issues and Recommended Fixes
+================================================================================
+
+
+--------------------------------------------------------------------------------
+1. [HIGH] Race Condition in snore_log_get_event()
+   File: snore_flash_log.c
+--------------------------------------------------------------------------------
+
+Problem:
+  snore_log_get_event() reads s_buf[] without a critical section, while
+  audio_inference_task may be writing to the same buffer via
+  snore_log_add_event() simultaneously. This can result in the BT stack task
+  reading partially-written event data during Morning Sync.
+
+Fix:
+  Wrap the read inside a FreeRTOS critical section:
+
+    bool snore_log_get_event(uint16_t index, snore_event_t *out)
+    {
+        taskENTER_CRITICAL();
+        {
+            uint16_t tail = (s_head + MAX - s_count) % MAX;
+            uint16_t phys = (tail + index) % MAX;
+            *out = s_buf[phys];
+        }
+        taskEXIT_CRITICAL();
+        return true;
+    }
+
+
+--------------------------------------------------------------------------------
+2. [MEDIUM] Stale Log Data Persisting Across Sessions
+   File: snore_flash_log.c, app_bt_gatt_handler.c
+--------------------------------------------------------------------------------
+
+Problem:
+  If BLE disconnects mid-sync, snore_log_clear() is never called. On the next
+  boot, flash_load() restores the old log into SRAM. This is the most likely
+  cause of the reported bug where the app always shows 9 events and 1 snore
+  episode even when no snoring activity occurred.
+
+Fix Option A:
+  Add a "sync completed" flag written to flash after a successful sync,
+  and check it on boot to decide whether to clear stale data:
+
+    // After snore_log_clear() in app_bt_morning_sync_send_next()
+    uint8_t flag = 1;
+    mtb_kvstore_write(&kvstore_obj, KV_KEY_SYNC_COMPLETE, &flag, sizeof(flag));
+
+    // In snore_log_init() after flash_load()
+    uint8_t sync_done = 0;
+    mtb_kvstore_read(&kvstore_obj, KV_KEY_SYNC_COMPLETE, &sync_done, &len);
+    if (!sync_done) {
+        // Previous sync was incomplete -- clear stale log
+        snore_log_clear();
+    }
+
+Fix Option B (debug/verify first):
+  Add logging at boot to confirm whether stale data is the root cause
+  before implementing a full fix:
+
+    // In snore_log_init() after flash_load()
+    printf("[FlashLog] Loaded %u events from flash on boot.\r\n", s_count);
+    for (uint16_t i = 0; i < s_count; i++) {
+        snore_event_t ev;
+        snore_log_get_event(i, &ev);
+        printf("  [%u] ts=%lu dur=%u haptic=%u\r\n",
+               i, ev.timestamp, ev.duration_s, ev.haptic_flag);
+    }
+
+
+--------------------------------------------------------------------------------
+3. [MEDIUM] Flash Write Blocking Audio Task
+   File: snore_flash_log.c (called from snore_detect.c)
+--------------------------------------------------------------------------------
+
+Problem:
+  snore_log_add_event() calls flash_save() inline inside audio_inference_task
+  (priority 4). Flash writes are slow and can cause audio inference loop
+  jitter, potentially affecting snore detection accuracy.
+  The code acknowledges this with an existing comment:
+    "a production design would offload to a low-priority flash task"
+
+Fix:
+  Offload flash writes to a dedicated low-priority task via a FreeRTOS queue:
+
+    // In snore_log_add_event() -- just enqueue, do not write flash directly
+    xQueueSend(s_flash_write_queue, event, 0);
+
+    // New flash_writer_task (priority 1)
+    void flash_writer_task(void *arg) {
+        snore_event_t ev;
+        for (;;) {
+            if (xQueueReceive(s_flash_write_queue, &ev, portMAX_DELAY)) {
+                // write to SRAM ring buffer and call flash_save() here
+            }
+        }
+    }
+
+  This keeps audio_inference_task unblocked and flash writes happen only
+  when CPU is otherwise idle.
+
+
+--------------------------------------------------------------------------------
+4. [LOW] Excessive Flash Write Cycles (Wear Leveling)
+   File: snore_flash_log.c
+--------------------------------------------------------------------------------
+
+Problem:
+  flash_save() is called on every single snore event, rewriting the entire
+  log (s_count x 7 bytes) each time. Flash memory has limited write cycles
+  (~10,000 to 100,000 depending on technology), so frequent writes will
+  degrade the flash over time.
+
+Fix:
+  Batch writes -- accumulate events in SRAM and flush to flash only when
+  one of the following conditions is met:
+    - Event count reaches a threshold (e.g., every 5 new events)
+    - A periodic timer fires (e.g., every few minutes)
+    - Before BLE Morning Sync begins (snore_detect_flush_open_episode()
+      already exists and can be extended for this purpose)
+
+  Example threshold check in snore_log_add_event():
+
+    if (s_count % FLASH_WRITE_BATCH_SIZE == 0) {
+        snore_log_flush_to_flash();
+    }
+
+
+--------------------------------------------------------------------------------
+5. [LOW] Flash/SRAM Desync on Power Loss
+   File: snore_flash_log.c
+--------------------------------------------------------------------------------
+
+Problem:
+  If power is lost after writing to s_buf[] in SRAM but before flash_save()
+  completes, the two copies become out of sync. Since SRAM is volatile,
+  the unsaved event is lost with no way to detect or recover it on reboot.
+
+Fix:
+  Write a sequence number alongside each flash save. On boot, compare
+  the sequence number stored with the count key against the one stored
+  with the data key. A mismatch indicates an incomplete write.
+
+    // On every flash_save()
+    s_write_sequence++;
+    mtb_kvstore_write(&kvstore_obj, KV_KEY_SEQ, &s_write_sequence, sizeof(s_write_sequence));
+
+    // On flash_load()
+    uint32_t seq_count, seq_data;
+    // read KV_KEY_SEQ written before count and after data
+    // if seq_count != seq_data --> partial write detected --> handle gracefully
+    //   e.g. discard last event, log a warning, or reset to last known good state
+
+
+================================================================================
+  Priority Summary
+================================================================================
+
+  HIGH    Race condition in snore_log_get_event()       --> Data corruption
+  MEDIUM  Stale log persisting across sessions           --> Incorrect app display
+  MEDIUM  Flash write blocking audio inference task      --> Inference jitter
+  LOW     Excessive flash write cycles                   --> Long-term HW damage
+  LOW     Flash/SRAM desync on power loss                --> Edge case data loss
+
+================================================================================

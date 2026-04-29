@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../../models/snore_event.dart';
 import 'ble_constants.dart';
@@ -23,6 +24,8 @@ class BleService {
   BluetoothCharacteristic? _timeSyncChar;
   BluetoothCharacteristic? _logTransferChar;
   BluetoothCharacteristic? _hapticIntensityChar;
+  BluetoothCharacteristic? _syncAckChar;
+  BluetoothCharacteristic? _hapticEnabledChar;
 
   StreamSubscription<BluetoothConnectionState>? _connectionSub;
   StreamSubscription<List<int>>? _notificationSub;
@@ -134,12 +137,18 @@ class BleService {
           _logTransferChar = c;
         } else if (c.characteristicUuid == BleConstants.hapticIntensityUuid) {
           _hapticIntensityChar = c;
+        } else if (c.characteristicUuid == BleConstants.syncAckUuid) {
+          _syncAckChar = c;
+        } else if (c.characteristicUuid == BleConstants.hapticEnabledUuid) {
+          _hapticEnabledChar = c;
         }
       }
 
       if (_timeSyncChar == null ||
           _logTransferChar == null ||
-          _hapticIntensityChar == null) {
+          _hapticIntensityChar == null ||
+          _syncAckChar == null ||
+          _hapticEnabledChar == null) {
         throw Exception('One or more required characteristics not found.');
       }
 
@@ -161,6 +170,8 @@ class BleService {
     _timeSyncChar = null;
     _logTransferChar = null;
     _hapticIntensityChar = null;
+    _syncAckChar = null;
+    _hapticEnabledChar = null;
     _connectedDeviceName = null;
     _connectionSub?.cancel();
     _connectionSub = null;
@@ -264,6 +275,22 @@ class BleService {
     return controller.stream;
   }
 
+  // ---------- Sync Ack ----------
+
+  /// Write sync ack to device after Morning Sync DB insert.
+  /// [success] = true clears the device log; false preserves it.
+  /// Failure to write is non-fatal — log survives and next sync will re-transmit.
+  Future<void> sendSyncAck({required bool success}) async {
+    if (_syncAckChar == null) return;
+    try {
+      final payload = BlePacketParser.encodeSyncAck(success: success);
+      await _syncAckChar!.write(payload, withoutResponse: false);
+    } catch (e) {
+      // Non-fatal: log survives on device; next sync will re-transmit (deduped by app)
+      debugPrint('[BLE] sendSyncAck failed: $e');
+    }
+  }
+
   // ---------- Haptic Intensity ----------
 
   /// Read current haptic level (0–4) from the device.
@@ -281,6 +308,25 @@ class BleService {
     _assertConnected();
     final payload = BlePacketParser.encodeHapticLevel(level.clamp(0, 4));
     await _hapticIntensityChar!.write(payload, withoutResponse: false);
+  }
+
+  // ---------- Haptic Enable ----------
+
+  /// Read whether the haptic motor is enabled on the device.
+  Future<bool?> readHapticEnabled() async {
+    if (_hapticEnabledChar == null) return null;
+    try {
+      final value = await _hapticEnabledChar!.read();
+      if (value.isNotEmpty) return value[0] != 0;
+    } catch (_) {}
+    return null;
+  }
+
+  /// Write haptic enable state to the device.
+  Future<void> writeHapticEnabled(bool enabled) async {
+    _assertConnected();
+    await _hapticEnabledChar!
+        .write([enabled ? 0x01 : 0x00], withoutResponse: false);
   }
 
   // ---------- Helpers ----------
