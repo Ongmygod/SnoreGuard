@@ -39,6 +39,12 @@ snoregurad_board/SnoreGuard_Firmware/build/
 # Word temporary lock files
 ~$*
 
+# Private project documents
+APP_SOFTWARE.md
+BOARD_SOFTWARE.md
+HARDWARE.md
+kosen_proposal_v18.txt
+
 # Misc
 *.log
 Thumbs.db
